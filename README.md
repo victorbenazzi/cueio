@@ -38,8 +38,10 @@ O app é assinado localmente (ad-hoc), então roda na máquina onde foi compilad
 
 | Arquivo | Papel |
 | --- | --- |
-| `Document.swift` | NSDocument: leitura, escrita, autosave, estado restaurável |
-| `DocumentWindowController.swift` | janela, toolbar, modos, modo foco, status |
+| `Document.swift` | NSDocument dono do texto (NSTextStorage): leitura, escrita, autosave, modo e estado de salvamento |
+| `EditorViewController.swift` | editor e preview, exibindo o storage do próprio documento |
+| `DocumentWindowController.swift` | janela: compõe editor, toolbar e rodapé, e aplica o modo foco |
+| `ModeToolbar.swift` | toolbar compacta com o seletor editor/preview |
 | `MarkdownHighlighter.swift` | realce incremental no NSTextStorage |
 | `MarkdownRenderer.swift` | markdown para HTML com [cmark-gfm](https://github.com/apple/swift-cmark) |
 | `PreviewView.swift` | WKWebView do preview, criado só quando usado |

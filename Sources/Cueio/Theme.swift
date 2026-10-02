@@ -32,35 +32,3 @@ enum Theme {
 extension UTType {
     static let markdownText = UTType(importedAs: "net.daringfireball.markdown", conformingTo: .plainText)
 }
-
-/// Preferências globais. Mudanças valem para todas as janelas abertas.
-final class Settings {
-    static let shared = Settings()
-    static let didChange = Notification.Name("CueioSettingsDidChange")
-    static let defaultFontSize: CGFloat = 13
-
-    private let defaults = UserDefaults.standard
-
-    var fontSize: CGFloat {
-        get {
-            let stored = defaults.double(forKey: "editorFontSize")
-            return stored > 0 ? stored : Self.defaultFontSize
-        }
-        set {
-            defaults.set(min(max(newValue, 10), 28), forKey: "editorFontSize")
-            notify()
-        }
-    }
-
-    var focusMode: Bool {
-        get { defaults.bool(forKey: "focusMode") }
-        set {
-            defaults.set(newValue, forKey: "focusMode")
-            notify()
-        }
-    }
-
-    private func notify() {
-        NotificationCenter.default.post(name: Self.didChange, object: nil)
-    }
-}

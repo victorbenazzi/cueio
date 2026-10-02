@@ -13,6 +13,8 @@ final class PreviewView: NSView, WKNavigationDelegate {
         super.init(frame: frameRect)
 
         webView.navigationDelegate = self
+        // Sem isso o WebKit pinta branco antes do HTML carregar e o preview pisca no tema escuro.
+        // O macOS não tem API pública equivalente.
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = Theme.background
         webView.translatesAutoresizingMaskIntoConstraints = false

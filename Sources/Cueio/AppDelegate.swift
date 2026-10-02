@@ -2,19 +2,14 @@ import AppKit
 import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
-    private var keyMonitor: Any?
+    /// Tag do item "Última aba" no menu Janela (⌘9).
+    static let lastTabTag = 9
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // O controller padrão precisa existir antes do launch para abrir arquivos vindos do Finder.
         _ = NSDocumentController.shared
         NSWindow.allowsAutomaticWindowTabbing = true
         NSApp.mainMenu = MainMenu.build()
-    }
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            Self.selectTab(for: event) ? nil : event
-        }
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -26,30 +21,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Registra o cueio como app padrão para markdown e texto. O macOS pode pedir confirmação.
     @objc func makeDefaultApp(_ sender: Any?) {
-        let types: [UTType] = [.markdownText, .plainText]
-        let group = DispatchGroup()
-        var failures: [String] = []
-        for type in types {
-            group.enter()
-            NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: type) { error in
-                DispatchQueue.main.async {
-                    if let error { failures.append(error.localizedDescription) }
-                    group.leave()
-                }
-            }
-        }
-        group.notify(queue: .main) {
+        Task { @MainActor in
             let alert = NSAlert()
-            if failures.isEmpty {
+            do {
+                for type in [UTType.markdownText, .plainText] {
+                    try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: type)
+                }
                 alert.messageText = "O cueio agora é o app padrão"
                 alert.informativeText = "Arquivos .md e .txt vão abrir no cueio. Markdown abre direto no preview."
-            } else {
+            } catch {
                 alert.alertStyle = .warning
                 alert.messageText = "Não foi possível definir o app padrão"
-                alert.informativeText = failures.joined(separator: "\n")
+                alert.informativeText = error.localizedDescription
             }
             alert.runModal()
         }
+    }
+
+    /// ⌘1 a ⌘8 escolhem a aba pela posição e ⌘9 vai para a última, como nos navegadores.
+    @objc func selectTab(_ sender: NSMenuItem) {
+        guard let target = tab(for: sender.tag) else { return }
+        if let group = target.tabGroup { group.selectedWindow = target } else { target.makeKeyAndOrderFront(nil) }
+    }
+
+    private func tab(for tag: Int) -> NSWindow? {
+        guard let window = NSApp.keyWindow, window.windowController is DocumentWindowController else { return nil }
+        let tabs = window.tabbedWindows ?? [window]
+        if tag == Self.lastTabTag { return tabs.last }
+        return tabs.indices.contains(tag - 1) ? tabs[tag - 1] : nil
     }
 
     @objc func toggleFocusMode(_ sender: Any?) { Settings.shared.focusMode.toggle() }
@@ -58,24 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func resetFontSize(_ sender: Any?) { Settings.shared.fontSize = Settings.defaultFontSize }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if item.action == #selector(toggleFocusMode(_:)) {
+        switch item.action {
+        case #selector(toggleFocusMode(_:)):
             item.state = Settings.shared.focusMode ? .on : .off
+            return true
+        case #selector(selectTab(_:)):
+            return tab(for: item.tag) != nil
+        default:
+            return true
         }
-        return true
-    }
-
-    /// ⌘1 a ⌘8 escolhem a aba pela posição e ⌘9 vai para a última, como nos navegadores.
-    private static func selectTab(for event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-              let key = event.charactersIgnoringModifiers, let index = Int(key), (1...9).contains(index),
-              let window = NSApp.keyWindow, window.windowController is DocumentWindowController
-        else { return false }
-
-        let tabs = window.tabbedWindows ?? [window]
-        let target = index == 9 ? tabs.last : (index <= tabs.count ? tabs[index - 1] : nil)
-        if let target {
-            if let group = window.tabGroup { group.selectedWindow = target } else { target.makeKeyAndOrderFront(nil) }
-        }
-        return true
     }
 }

@@ -6,26 +6,20 @@ enum DocumentMode: String {
     case preview
 }
 
+enum SaveState {
+    case draft
+    case edited
+    case saved
+}
+
 @objc(CueioDocument)
 final class Document: NSDocument {
+    static let stateDidChange = Notification.Name("CueioDocumentStateDidChange")
     static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkdn"]
 
-    private(set) var text = ""
-    private var hasLoadedFromDisk = false
-
-    var mode: DocumentMode = .raw {
-        didSet {
-            guard mode != oldValue else { return }
-            invalidateRestorableState()
-            onModeChange?()
-        }
-    }
-
-    /// Fonte da verdade enquanto há uma janela aberta: o texto vive no NSTextView e só é copiado ao salvar.
-    var textProvider: (() -> String)?
-    var onStateChange: (() -> Void)?
-    var onContentReload: (() -> Void)?
-    var onModeChange: (() -> Void)?
+    /// O texto vive aqui e o editor exibe este mesmo storage: não existe cópia para sincronizar.
+    let storage = NSTextStorage()
+    private var preferredMode: DocumentMode = .raw
 
     // Autosave em arquivo, versões e restauração de rascunhos vêm do NSDocument.
     override class var autosavesInPlace: Bool { true }
@@ -42,25 +36,39 @@ final class Document: NSDocument {
         return type.conforms(to: .markdownText)
     }
 
+    /// Texto puro nunca tem preview, então o modo efetivo já respeita essa regra.
+    var mode: DocumentMode {
+        get { isMarkdown ? preferredMode : .raw }
+        set {
+            guard newValue != preferredMode else { return }
+            preferredMode = newValue
+            invalidateRestorableState()
+            notifyStateChange()
+        }
+    }
+
+    var saveState: SaveState {
+        if fileURL == nil { return .draft }
+        return hasUnautosavedChanges ? .edited : .saved
+    }
+
     override func makeWindowControllers() {
-        addWindowController(DocumentWindowController())
+        // Arquivo vindo do disco abre no preview; rascunho novo abre no editor.
+        // A restauração de sessão roda depois e sobrescreve esta escolha.
+        preferredMode = fileURL == nil ? .raw : .preview
+        addWindowController(DocumentWindowController(document: self))
     }
 
     override func read(from data: Data, ofType typeName: String) throws {
-        guard let decoded = Self.decode(data) else {
+        guard let text = Self.decode(data) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
-        text = decoded
-        if !hasLoadedFromDisk {
-            hasLoadedFromDisk = true
-            mode = isMarkdown ? .preview : .raw
-        }
-        onContentReload?()
+        storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: text)
+        undoManager?.removeAllActions()
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        if let current = textProvider?() { text = current }
-        return Data(text.utf8)
+        Data(storage.string.utf8)
     }
 
     override func updateChangeCount(_ change: NSDocument.ChangeType) {
@@ -75,7 +83,7 @@ final class Document: NSDocument {
 
     override func encodeRestorableState(with coder: NSCoder) {
         super.encodeRestorableState(with: coder)
-        coder.encode(mode.rawValue as NSString, forKey: "cueioMode")
+        coder.encode(preferredMode.rawValue as NSString, forKey: "cueioMode")
     }
 
     override func restoreState(with coder: NSCoder) {
@@ -87,7 +95,9 @@ final class Document: NSDocument {
     }
 
     private func notifyStateChange() {
-        DispatchQueue.main.async { [weak self] in self?.onStateChange?() }
+        DispatchQueue.main.async { [weak self] in
+            NotificationCenter.default.post(name: Self.stateDidChange, object: self)
+        }
     }
 
     private static func decode(_ data: Data) -> String? {

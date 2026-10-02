@@ -104,6 +104,15 @@ enum MainMenu {
         menu.addItem(item("Minimizar", #selector(NSWindow.performMiniaturize(_:)), "m"))
         menu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
         menu.addItem(.separator())
+        let tabs = NSMenu(title: "Ir para aba")
+        for number in 1...AppDelegate.lastTabTag {
+            let title = number == AppDelegate.lastTabTag ? "Última aba" : "Aba \(number)"
+            let tabItem = item(title, #selector(AppDelegate.selectTab(_:)), "\(number)")
+            tabItem.tag = number
+            tabs.addItem(tabItem)
+        }
+        menu.addItem(submenu(tabs))
+        menu.addItem(.separator())
         menu.addItem(item("Trazer tudo para a frente", #selector(NSApplication.arrangeInFront(_:))))
         return menu
     }

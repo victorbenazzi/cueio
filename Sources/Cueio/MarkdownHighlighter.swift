@@ -28,38 +28,56 @@ struct EditorStyle {
 
 /// Realce leve de markdown direto no NSTextStorage: só fonte e cor, o texto continua puro.
 /// A cada edição reestiliza apenas os parágrafos tocados; blocos de código cercados forçam
-/// uma passada completa quando a estrutura deles muda.
+/// uma passada completa quando a estrutura deles muda. Trocar o estilo ou o tipo do
+/// documento reaplica tudo automaticamente.
 final class MarkdownHighlighter: NSObject, NSTextStorageDelegate {
-    var style = EditorStyle(fontSize: Settings.defaultFontSize)
-    var isMarkdown = true
+    private let storage: NSTextStorage
     private var fences: [NSRange] = []
 
-    func restyle(_ storage: NSTextStorage) {
+    var style: EditorStyle {
+        didSet { restyle() }
+    }
+
+    var isMarkdown: Bool {
+        didSet { if isMarkdown != oldValue { restyle() } }
+    }
+
+    init(storage: NSTextStorage, style: EditorStyle, isMarkdown: Bool) {
+        self.storage = storage
+        self.style = style
+        self.isMarkdown = isMarkdown
+        super.init()
+        storage.delegate = self
+        restyle()
+    }
+
+    private func restyle() {
         storage.beginEditing()
         fences = isMarkdown ? Self.findFences(in: storage.string as NSString) : []
-        highlight(storage, in: NSRange(location: 0, length: storage.length))
+        highlight(in: NSRange(location: 0, length: storage.length))
         storage.endEditing()
     }
 
     func textStorage(_ storage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions,
                      range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
-        let string = storage.string as NSString
+        highlight(in: dirtyRange(for: editedRange, delta: delta))
+    }
 
-        guard isMarkdown else {
-            highlight(storage, in: string.paragraphRange(for: editedRange))
-            return
-        }
+    /// Só os parágrafos editados, a menos que a estrutura dos blocos de código tenha mudado.
+    private func dirtyRange(for editedRange: NSRange, delta: Int) -> NSRange {
+        let string = storage.string as NSString
+        let paragraphs = string.paragraphRange(for: editedRange)
+        guard isMarkdown else { return paragraphs }
 
         let expected = fences.map { Self.shift($0, by: editedRange, delta: delta) }
         fences = Self.findFences(in: string)
-        let range = expected == fences ? string.paragraphRange(for: editedRange) : NSRange(location: 0, length: string.length)
-        highlight(storage, in: range)
+        return expected == fences ? paragraphs : NSRange(location: 0, length: string.length)
     }
 
     // MARK: - Estilos
 
-    private func highlight(_ storage: NSTextStorage, in range: NSRange) {
+    private func highlight(in range: NSRange) {
         storage.setAttributes(style.baseAttributes, range: range)
         guard isMarkdown, range.length > 0 else { return }
 
