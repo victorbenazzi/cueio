@@ -29,8 +29,12 @@ final class PreviewView: NSView, WKNavigationDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
 
+    /// Endereço que o WebKit atribui à página: links relativos e âncoras são resolvidos contra ele.
+    private var pageURL = URL(string: "about:blank")!
+
     func render(markdown: String, baseURL: URL?) {
         let body = MarkdownRenderer.html(from: markdown)
+        pageURL = baseURL ?? URL(string: "about:blank")!
         webView.loadHTMLString(PreviewTemplate.page(body: body), baseURL: baseURL)
     }
 
@@ -40,14 +44,42 @@ final class PreviewView: NSView, WKNavigationDelegate {
             decisionHandler(.allow)
             return
         }
-        // Âncoras internas (notas de rodapé) rolam a página; o resto abre no app padrão.
-        let page = webView.url?.absoluteString.split(separator: "#").first
-        if url.fragment != nil, url.absoluteString.split(separator: "#").first == page {
-            decisionHandler(.allow)
-            return
-        }
-        NSWorkspace.shared.open(url)
+        // O WebKit nunca navega por clique: a página vem de loadHTMLString, e até "ir para #x" vira
+        // uma navegação contra a pasta do arquivo. A rolagem e a abertura de links ficam por nossa conta.
         decisionHandler(.cancel)
+        if let fragment = url.fragment(percentEncoded: false), isCurrentPage(url) {
+            scroll(to: fragment)
+        } else if url.isFileURL, opensInCueio(url) {
+            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func isCurrentPage(_ url: URL) -> Bool {
+        url.absoluteString.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first
+            == Substring(pageURL.absoluteString)
+    }
+
+    /// Markdown e texto que o cueio edita abrem numa aba nova; o resto vai para o app padrão.
+    private func opensInCueio(_ url: URL) -> Bool {
+        let controller = NSDocumentController.shared
+        guard let type = try? controller.typeForContents(of: url) else { return false }
+        return controller.documentClass(forType: type) != nil
+    }
+
+    /// Aceita o id exato (notas de rodapé), o slug do texto (`#Minha Seção` acha `minha-seção`)
+    /// e, por último, o slug sem acentos (`#secao` também acha `seção`).
+    /// Roda num mundo isolado: o JavaScript da página continua desligado.
+    private func scroll(to fragment: String) {
+        let script = """
+        const fold = s => s.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
+        const target = ids.map(id => document.getElementById(id)).find(Boolean)
+          ?? [...document.querySelectorAll('[id]')].find(el => fold(el.id) === fold(ids[1]));
+        if (target) target.scrollIntoView(); else if (!ids[0]) window.scrollTo(0, 0);
+        """
+        webView.callAsyncJavaScript(script, arguments: ["ids": [fragment, MarkdownRenderer.slug(fragment)]],
+                                    in: nil, in: .defaultClient)
     }
 }
 
@@ -87,6 +119,7 @@ enum PreviewTemplate {
     h1, h2, h3, h4, h5, h6 { margin: 28px 0 14px; font-weight: 600; line-height: 1.25; letter-spacing: -.015em; }
     h1 { font-size: 2em; } h2 { font-size: 1.5em; } h3 { font-size: 1.25em; }
     h4 { font-size: 1em; } h5 { font-size: .875em; } h6 { font-size: .85em; color: var(--muted); }
+    [id] { scroll-margin-top: 16px; }
     h1, h2 { padding-bottom: .3em; border-bottom: 1px solid var(--line); }
     p, blockquote, ul, ol, dl, table, pre, details { margin: 0 0 16px; }
     ul, ol { padding-left: 2em; }
